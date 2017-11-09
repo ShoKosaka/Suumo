@@ -1,0 +1,542 @@
+---
+title: "Suumo"
+author: "Sho Kosaka"
+date: "9/25/2017"
+output: html_document
+---
+
+```{r}
+#必要なライブラリをインポート
+library(ggplot2)
+library(dplyr)
+library(maptools)
+library(randomForest)
+library(ggrepel)
+library(psych)
+
+setwd("~/Desktop/DataAnalysis/Suumo") 
+df <- read.csv("suumo_tokyo3.csv", fileEncoding = "UTF-16", sep = "\t") #前処理したデータを読み込み
+names(df) <- c("index", "name","address","ward","city","rooms","DK","K","L","S","age","height","order","area","rent_adm",
+               "initial_cost","route1","station1","distance1","route2","station2","distance2","route3","station3","distance3",
+               "rent","administration","deposit","gratuity","security","non_refund","depreciation") #英語でカラム名付け替え
+
+#factorに変換
+df$DK <- as.factor(df$DK)
+df$K <- as.factor(df$K)
+df$L <- as.factor(df$L)
+df$S <- as.factor(df$S)
+
+#df$age_range <- cut(df$age , breaks=c(0,5,10,15,20,25,30,35,40,45,50))
+
+#べき乗で表示されないように
+options(scipen=100)
+```
+
+```{r}
+df1 <- df %>%
+  select(ward) %>%
+  group_by(ward) %>%
+  tally() %>%
+  arrange((n))
+
+df1$ward <- as.character(df1$ward)
+df1$ward <- factor(df1$ward, levels=unique(df1$ward))
+
+df1$pop <- c(58.6,211.3,191.7,143.0,210.3,261.7,219.9,244.0,271.5,280.6,
+             341.3,452.8,501.5,378.1,321.7,334.2,686.4,678.6,712.1,550.8,
+             719.1,553.3,883.3)
+
+ggplot(df1,aes(ward,n)) +
+  geom_bar(stat="identity")+
+  ggtitle("区別物件数")+xlab("")+ylab("物件数")+ 
+  theme(axis.text.x = element_text(angle = 180, hjust =1))+
+  theme_bw(base_family = "HiraKakuProN-W3") +
+  coord_flip() +
+  ylim(0,25000) + scale_y_continuous(labels = scales::comma)
+```
+
+```{r}
+ggplot(df1,aes(pop,n)) +
+  geom_point()+
+  ggtitle("物件数 vs 人口")+xlab("人口（千人）")+ylab("物件数")+ 
+  geom_text_repel(label = df1$ward, family = "HiraKakuProN-W3", size = 3) +
+  theme_bw(base_family = "HiraKakuProN-W3") +
+  ylim(0,25000) + scale_y_continuous(labels = scales::comma)
+```
+
+```{r}
+cor(df1$n, df1$pop)
+```
+
+
+
+```{r}
+byrentmedian <- with(df, reorder(ward, rent_adm, median))
+par(las=1, cex.axis=0.7, family = "HiraKakuProN-W3")
+boxplot(rent_adm ~ byrentmedian, data = df,
+          xlab = "賃料+管理費", ylab = "",
+          main = "区別家賃", varwidth = TRUE, horizontal=TRUE)
+```
+```{r}
+par(las=1, cex.axis=0.7, family = "HiraKakuProN-W3")
+boxplot(rent_adm ~ byrentmedian, data = df,
+          xlab = "賃料+管理費", ylab = "",
+          main = "区別家賃（〜40万円）", varwidth = TRUE, horizontal=TRUE, ylim = c(0,400000), outline=FALSE)
+```
+
+```{r}
+ggplot(df,aes(rooms, rent_adm)) + geom_jitter() +ggtitle("賃料+管理費 vs 部屋数")+xlab("部屋数")+ylab("賃料+管理費")+ theme(axis.text.x = element_text(angle = 180, hjust =1))+theme_bw(base_family = "HiraKakuProN-W3") + geom_smooth(method="lm")  + scale_x_continuous(breaks=seq(0,10,1)) + scale_y_continuous(labels = scales::comma)
+```
+```{r}
+#エラーデータ削除
+df <- subset(df, rooms <=9)
+subset(df, rooms >= 9)
+```
+
+
+
+```{r}
+#不要
+ggplot(df,aes(rent_adm)) + geom_freqpoly(bins = 100) +ggtitle("賃料+管理費　分布")+xlab("賃料+管理費")+ylab("物件数")+ theme(axis.text.x = element_text(angle = 180, hjust =1))+theme_bw(base_family = "HiraKakuProN-W3") + xlim(0,500000)
+```
+```{r}
+df_sub <- subset(df, ward=="港区" | ward=="世田谷区" | ward=="葛飾区")
+
+ggplot(df_sub,aes(rent_adm, color = ward)) + geom_freqpoly(bins = 100) +ggtitle("賃料+管理費　分布（世田谷区、港区、葛飾区）")+xlab("賃料+管理費")+ylab("物件数")+ theme(axis.text.x = element_text(angle = 180, hjust =1))+theme_bw(base_family = "HiraKakuProN-W3") + scale_x_continuous(labels = scales::comma, limits=c(0, 500000)) + scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+ggplot(df) +
+  geom_freqpoly(aes(distance1, color="blue"),bins = 30)+
+  geom_freqpoly(aes(distance2, color="green"),bins = 30)+
+  geom_freqpoly(aes(distance3, color="red"),bins = 30)+
+  ggtitle("最寄り３駅からの距離")+xlab("徒歩〜分")+ylab("物件数")+ 
+  theme_bw(base_family = "HiraKakuProN-W3")+
+  xlim(0,30) +scale_y_continuous(labels = scales::comma) +
+  scale_color_hue(name = "", labels = c("一つ目の立地", "二つ目の立地","三つ目の立地"))
+```
+
+```{r}
+ggplot(df,aes(x=rent_adm,y=initial_cost)) +
+  geom_point()+
+  ggtitle("敷金・礼金・保証金 vs 賃料")+xlab("賃料")+ylab("敷金・礼金・保証金")+
+  theme_bw(base_family = "HiraKakuProN-W3") +scale_y_continuous(labels = scales::comma, limits = c(0,1000000))+
+  scale_x_continuous(labels = scales::comma, limits = c(0,500000))
+```
+```{r}
+byagemedian <- with(df, reorder(ward, age, median))
+par(las=1, cex.axis=0.7, family = "HiraKakuProN-W3")
+boxplot(age ~ byagemedian, data = df,
+          xlab = "築年数", ylab = "",
+          main = "区別築年数", varwidth = TRUE, horizontal=TRUE, ylim = c(0,70), outline=FALSE)
+```
+
+```{r}
+#不要
+ggplot(df,aes(x=area,y=rooms)) +
+  geom_jitter()+
+  ggtitle("面積 vs 部屋数")+xlab("面積")+ylab("部屋数")+
+  theme_bw(base_family = "HiraKakuProN-W3")+scale_y_continuous(breaks=seq(0,10,1)) + xlim(0,500)
+```
+
+```{r}
+df11 <- df %>%
+  select(rent_adm, ward, rooms,area, DK, K, L, S, age, height, order, distance1)
+
+pairs.panels(df11)
+```
+
+```{r}
+df12 <- df %>%
+  select(rent_adm, ward, rooms, K, L, S, age, height, distance1)
+
+pairs.panels(df12)
+```
+
+```{r}
+set.seed(1234)
+id_train <- sample(1:nrow(df),nrow(df)/5*4)
+train <- df[id_train,]
+test <- df[-id_train,]
+```
+
+```{r}
+low <- 100000
+high <- 200000
+df_low <- subset(df, rent < low)
+df_middle <- subset(df, rent >= low & rent < high)
+df_high <- subset(df, rent >= high)
+```
+
+```{r}
+set.seed(1234)
+id_train1 <- sample(1:nrow(df_low),nrow(df_low)/5*4)
+train1 <- df_low[id_train1,]
+test1 <- df_low[-id_train1,]
+
+lm_rent_low <- lm(rent_adm ~ ward + rooms + K + L + S + age + height + distance1
+              #+distance2 + distance3
+              , data = train1)
+
+#summary(lm_rent_low)
+
+plot(lm_rent_low, which=2)
+```
+
+```{r}
+set.seed(1234)
+id_train2 <- sample(1:nrow(df_middle),nrow(df_middle)/5*4)
+train2 <- df_middle[id_train2,]
+test2 <- df_middle[-id_train2,]
+
+lm_rent_middle <- lm(rent_adm ~ ward + rooms + K + L + S + age + height + distance1
+              #+distance2 + distance3
+              , data = train2)
+
+#summary(lm_rent_middle)
+
+plot(lm_rent_middle, which=2)
+```
+
+```{r}
+set.seed(1234)
+id_train3 <- sample(1:nrow(df_high),nrow(df_high)/5*4)
+train3 <- df_high[id_train3,]
+test3 <- df_high[-id_train3,]
+
+lm_rent_high <- lm(rent_adm ~ ward + rooms + K + L + S + age + height + distance1
+              #+distance2 + distance3
+              , data = train3)
+
+#summary(lm_rent_high)
+
+plot(lm_rent_high, which=2)
+```
+
+
+```{r}
+#areaはroomsと、DKはKと、orderはheightと相関が高いため除外
+lm_rent <- lm(rent_adm ~ ward + rooms + K + L + S + age + height + distance1
+              #+distance2 + distance3
+              , data = train)
+
+
+summary(lm_rent)
+sink()
+
+barplot(lm_rent$coefficients)
+
+plot(lm_rent, which=2)
+```
+```{r}
+lm_rent1 <- lm(rent_adm ~ (ward + rooms + DK + K + L + S + area + age + height + order + distance1)^2
+              #+distance2 + distance3
+              , data = train)
+
+lm_rent2 <- step(lm_rent1)
+
+saveRDS(lm_rent2, file="lm_rent2")
+lm_rent2 <- readRDS(file="lm_rent2")
+
+lm_rent2
+```
+
+
+
+```{r}
+df_lm_pred <- predict(lm_rent, newdata = test)
+```
+
+```{r}
+df7 <- df %>%
+  group_by(ward) %>%
+  summarise(rent_mean = mean(rent_adm))
+
+for (x in 1:nrow(df7)) {
+  if (df7$ward[x] == "足立区") {
+    df7$ward_eng[x] <- "Adachi-ku"
+  } else if (df7$ward[x] == "荒川区") {
+    df7$ward_eng[x] <- "Arakawa-ku"
+  } else if (df7$ward[x] == "文京区") {
+    df7$ward_eng[x] <- "Bunkyo-ku"
+  } else if (df7$ward[x] == "千代田区") {
+    df7$ward_eng[x] <- "Chiyoda-ku"
+  } else if (df7$ward[x] == "中央区") {
+    df7$ward_eng[x] <- "Chuo-ku"
+  } else if (df7$ward[x] == "江戸川区") {
+    df7$ward_eng[x] <- "Edogawa-ku"
+  } else if (df7$ward[x] == "板橋区") {
+    df7$ward_eng[x] <- "Itabashi-ku"
+  } else if (df7$ward[x] == "葛飾区") {
+    df7$ward_eng[x] <- "Katsushika-ku"
+  } else if (df7$ward[x] == "北区") {
+    df7$ward_eng[x] <- "Kita-ku"
+  } else if (df7$ward[x] == "江東区") {
+    df7$ward_eng[x] <- "Koto-ku"
+  } else if (df7$ward[x] == "目黒区") {
+    df7$ward_eng[x] <- "Meguro-ku"
+  } else if (df7$ward[x] == "港区") {
+    df7$ward_eng[x] <- "Minato-ku"
+  } else if (df7$ward[x] == "中野区") {
+    df7$ward_eng[x] <- "Nakano-ku"
+  } else if (df7$ward[x] == "練馬区") {
+    df7$ward_eng[x] <- "Nerima-ku"
+  } else if (df7$ward[x] == "大田区") {
+    df7$ward_eng[x] <- "Ota-ku"
+  } else if (df7$ward[x] == "世田谷区") {
+    df7$ward_eng[x] <- "Setagaya-ku"
+  } else if (df7$ward[x] == "渋谷区") {
+    df7$ward_eng[x] <- "Shibuya-ku"
+  } else if (df7$ward[x] == "品川区") {
+    df7$ward_eng[x] <- "Shinagawa-ku"
+  } else if (df7$ward[x] == "新宿区") {
+    df7$ward_eng[x] <- "Shinjuku-ku"
+  } else if (df7$ward[x] == "杉並区") {
+    df7$ward_eng[x] <- "Suginami-ku"
+  } else if (df7$ward[x] == "墨田区") {
+    df7$ward_eng[x] <- "Sumida-ku"
+  } else if (df7$ward[x] == "台東区") {
+    df7$ward_eng[x] <- "Taito-ku"
+  } else if (df7$ward[x] == "豊島区") {
+    df7$ward_eng[x] <- "Toshima-ku"
+  }
+}
+```
+
+
+```{r}
+#http://ill-identified.hatenablog.com/entry/2014/02/27/211021を参考にした
+
+
+tokyo.map <- readShapeSpatial("~/Desktop/Python/Suumo/japan_ver81.shp")
+
+# パスは各自任意で変更すること.
+# シェイプファイルに含まれる属性データは以下の通り.
+# N03_001: 都道府県名
+# N03_002: 支庁・振興局名 (北海道のみ)
+# N03_003: 郡・政令市名
+# N03_004: 市区町村名
+# N03_007: 行政区域コード
+# fortify で data.frame に変換した後の結合キーにするため, rowname を変数に代入
+# 参考: http://www.r-bloggers.com/using-r-working-with-geospatial-data-and-ggplot2/
+plot(tokyo.map)
+
+tokyo.map$id <- rownames(tokyo.map@data)
+
+tokyo.map <- subset(tokyo.map, CITY_ENG == "Adachi-ku" | CITY_ENG == "Arakawa-ku" | CITY_ENG == "Bunkyo-ku" |
+                       CITY_ENG == "Chiyoda-ku" | CITY_ENG == "Chuo-ku" | CITY_ENG == "Edogawa-ku" |
+                       CITY_ENG == "Itabashi-ku" | CITY_ENG == "Katsushika-ku" | CITY_ENG == "Kita-ku" |
+                       CITY_ENG == "Koto-ku" | CITY_ENG == "Meguro-ku" | CITY_ENG == "Minato-ku" |
+                       CITY_ENG == "Nakano-ku" | CITY_ENG == "Nerima-ku" | CITY_ENG == "Ota-ku" |
+                       CITY_ENG == "Setagaya-ku" | CITY_ENG == "Shibuya-ku" | CITY_ENG == "Shinagawa-ku" |
+                       CITY_ENG == "Shinjuku-ku" | CITY_ENG == "Suginami-ku" | CITY_ENG == "Sumida-ku" |
+                       CITY_ENG == "Taito-ku" | CITY_ENG == "Toshima-ku" )
+
+# 属性データに選挙情報を結合
+# 市区町村名をキーとして左結合
+tokyo.map2 <- merge(x=tokyo.map, y=df7, by.x="CITY_ENG",by.y="ward_eng", duplicateGeoms=TRUE)
+# ポリゴンデータをデータフレームに変換
+tokyo.gg.df <- fortify(tokyo.map2)
+# データフレーム化したポリゴンデータに属性データを左結合
+tokyo.gg.df <- merge(x=tokyo.gg.df, y=tokyo.map2@data, by="id", all.x = T)
+
+# 区名ラベル位置座標
+location <- lapply(tokyo.map2@polygons, function(x) slot(x,"labpt") )
+location <- as.data.frame(matrix(unlist(location), ncol=2, byrow=T, dimnames=list(NULL,c("x","y"))) )
+location$id <-unlist(lapply(tokyo.map2@polygons, function(x) slot(x,"ID") ) )
+# ラベル位置と市区町村名結合
+label.gg.df <- merge(x=location, y=unique(tokyo.gg.df[,c("CITY_ENG","id")]), by.x="id", by.y="id", all.x = T)
+label.gg.df <- label.gg.df[!duplicated(label.gg.df$CITY_ENG),] # 重複削除 (雑)
+
+#write.csv(tokyo.gg.df, file = "tokyo.gg.df.csv")
+#tokyo.gg.df1 <- read.csv("tokyo.gg.df.csv", fileEncoding = "UTF-8", sep = "\t")
+write.csv(label.gg.df, file = "label.gg.df.csv")
+label.gg.df1 <- read.csv("label.gg.df.csv", fileEncoding = "UTF-8", sep = ",") #Excel上で手動で日本語化。UTF-8で保存。
+
+ggplot(tokyo.gg.df) + 
+  geom_polygon(aes(long,lat, group=group, fill=rent_mean), color="white") +
+  geom_text(data =label.gg.df1, aes(x,y,label=CITY_ENG, family = "HiraKakuPro-W3"), size=3) + 
+  scale_fill_continuous(name="平均賃料") +
+  labs(title="東京23区 平均賃料")+theme_bw(base_family = "HiraKakuProN-W3")
+
+```
+
+
+```{r}
+#不使用
+library(ggmap)
+
+map <- get_map(c(139.6917, 35.68949))
+
+map <- get_googlemap(center=c(139.6917,35.68949), scale=2, size=c(600, 600), zoom=12)
+ggmap(map)
+
+ggmap(map) + geom_point(data=c(139.7238,35.64918), aes(x=経度, y=緯度), color='red')
+```
+
+```{r}
+#不要
+center <- geocode('kanazawa')
+map <- get_map(c(center$lon, center$lat), zoom = 5, maptype = 'roadmap')
+ggmap(map) + geom_point(data=locations, aes(x = geo_coordinates_1, y = geo_coordinates_0), color = 'red', size = 0.7)
+```
+
+```{r}
+#16時間かかるので注意
+df_rf <- randomForest(rent_adm ~ ward + rooms + area + DK + K + L + S + age + height + order + distance1
+              #+distance2 + distance3
+              , data = train, na.action = "na.omit", trees = 300)
+
+saveRDS(df_rf, file="df_rf")
+df_rf <- readRDS(file="df_rf")
+
+print(df_rf)
+summary(df_rf)
+plot(df_rf)
+print(df_rf$importance)
+label_rf <- c("区","部屋数","L","建物高さ","階数","築年数","DK","徒歩〜分","S","K")
+varImpPlot(df_rf, main="Contribution")
+```
+```{r}
+features <- train[c(4,6:14)]
+labels <- train[15]
+tuneRF(x =features, y = train$rent_adm,
+                   #stepFactor = 2, improve = 0.05, trace = TRUE, plot = TRUE,
+                   doBest = TRUE )
+str(train)
+```
+
+
+
+```{r}
+df_rf_pred <- predict(df_rf, test[,-15]) #rent_admを削除
+df_rf_pred_csv <- data.frame(df_rf_pred)
+write.csv(df_rf_pred_csv, "df_rf_pred.csv")
+```
+
+```{r}
+ggplot(test) + geom_line(aes(x=1:nrow(test),y=rent_adm,color="red"))+ 
+  #geom_line(aes(x=1:nrow(test),y=df_rf_pred,color="red"))+ 
+  #geom_line(aes(x=1:nrow(test),y=df_lm_pred,color="blue"))+
+  ggtitle("テストデータ")+xlab("index")+ylab("家賃")+ 
+  scale_color_hue(name = "", labels = c("テストデータ") ) +
+  theme(axis.text.x = element_text(angle = 180, hjust =1))+theme_bw(base_family = "HiraKakuProN-W3")+
+  ylim(0,1000000)
+```
+
+
+```{r}
+ggplot(test) + geom_line(aes(x=1:nrow(test),y=rent_adm,color="blue"))+ 
+  #geom_line(aes(x=1:nrow(test),y=df_rf_pred,color="red"))+ 
+  geom_line(aes(x=1:nrow(test),y=df_lm_pred,color="red"))+
+  ggtitle("テストデータ vs 予測データ（重回帰分析）")+xlab("index")+ylab("家賃")+ 
+  scale_color_hue(name = "", labels = c("テストデータ","重回帰分析") ) +
+  theme(axis.text.x = element_text(angle = 180, hjust =1))+theme_bw(base_family = "HiraKakuProN-W3")+
+  ylim(0,1000000)
+```
+```{r}
+ggplot(test) + geom_line(aes(x=1:nrow(test),y=rent_adm,color="blue"))+ 
+  geom_line(aes(x=1:nrow(test),y=df_rf_pred,color="red"))+ 
+  #geom_line(aes(x=1:nrow(test),y=df_lm_pred,color="green"))+
+  ggtitle("テストデータ vs 予測データ（ランダムフォレスト）")+xlab("index")+ylab("家賃")+ 
+  scale_color_hue(name = "", labels = c("テストデータ","ランダムフォレスト") ) +
+  theme(axis.text.x = element_text(angle = 180, hjust =1))+theme_bw(base_family = "HiraKakuProN-W3")+
+  ylim(0,1000000)
+```
+
+```{r}
+test_sort <- test %>%
+  arrange((rent_adm))
+
+ggplot(test_sort) + geom_line(aes(x=1:nrow(test_sort),y=rent_adm,color="red"))+ 
+  #geom_line(aes(x=1:nrow(test),y=df_rf_pred,color="red"))+ 
+  #geom_line(aes(x=1:nrow(test),y=df_lm_pred,color="blue"))+
+  ggtitle("テストデータ")+xlab("index")+ylab("家賃")+ 
+  scale_color_hue(name = "", labels = c("テストデータ") ) +
+  theme(axis.text.x = element_text(angle = 180, hjust =1))+theme_bw(base_family = "HiraKakuProN-W3")+
+  ylim(0,1000000)
+```
+
+```{r}
+df_lm_pred_sort <- predict(lm_rent, newdata = test_sort)
+
+ggplot(test_sort) + 
+  #geom_line(aes(x=1:nrow(test),y=df_rf_pred,color="red"))+ 
+  geom_line(aes(x=1:nrow(test_sort),y=df_lm_pred_sort,color="red"))+
+  geom_line(aes(x=1:nrow(test_sort),y=rent_adm,color="blue"))+ 
+  ggtitle("テストデータ vs 予測データ（重回帰分析）")+xlab("index")+ylab("家賃")+ 
+  scale_color_hue(name = "", labels = c("テストデータ","重回帰分析") ) +
+  theme(axis.text.x = element_text(angle = 180, hjust =1))+theme_bw(base_family = "HiraKakuProN-W3")+
+  ylim(0,1000000)
+```
+
+```{r}
+df_rf_pred_sort <- predict(df_rf, test_sort[,-15])
+
+ggplot(test_sort) + 
+  geom_line(aes(x=1:nrow(test_sort),y=df_rf_pred_sort,color="red"))+ 
+  geom_line(aes(x=1:nrow(test_sort),y=rent_adm,color="blue"))+ 
+  #geom_line(aes(x=1:nrow(test),y=df_lm_pred,color="green"))+
+  ggtitle("テストデータ vs 予測データ（ランダムフォレスト）")+xlab("index")+ylab("家賃")+ 
+  scale_color_hue(name = "", labels = c("テストデータ","ランダムフォレスト") ) +
+  theme(axis.text.x = element_text(angle = 180, hjust =1))+theme_bw(base_family = "HiraKakuProN-W3")+
+  ylim(0,1000000)
+```
+
+
+
+```{r}
+df_rf_diff <- df_rf_pred - test$rent_adm
+df_lm_diff <- df_lm_pred - test$rent_adm
+
+df_rf_diff_sq <- df_rf_diff ^ 2
+df_lm_diff_sq <- df_lm_diff ^ 2
+sum(df_rf_diff_sq, na.rm = TRUE)
+sum(df_lm_diff_sq, na.rm = TRUE)
+
+table_diff <- data.frame("diff_sq" = c(sum(df_rf_diff_sq, na.rm = TRUE),sum(df_lm_diff_sq, na.rm = TRUE)),
+                         "model" = c("ランダムフォレスト","重回帰分析"))
+
+ggplot(table_diff,aes(model,diff_sq)) + 
+  geom_bar(stat = "identity")+
+  ggtitle("残差平方和：ランダムフォレスト vs 重回帰分析")+xlab("")+ylab("残差平方和")+ 
+  theme_bw(base_family = "HiraKakuProN-W3") + scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+df$pred_rf <- predict(df_rf, newdata = df)
+
+df$diff <- df$pred_rf - df$rent_adm
+
+df_sort <- df %>%
+  arrange(desc(diff))
+
+```
+
+
+```{r}
+df_tokyo2 <- read.csv("suumo_tokyo2.csv", fileEncoding = "UTF-16", sep = "\t") #前処理したデータを読み込み
+names(df_tokyo2) <- c("index", "name","address","ward","city","rooms","DK","K","L","S","age","height","order","area","rent_adm",
+               "initial_cost","route1","station1","distance1","route2","station2","distance2","route3","station3","distance3",
+               "rent","administration","deposit","gratuity","security","non_refund","depreciation") #英語でカラム名付け替え
+
+#factorに変換
+df_tokyo2$DK <- as.factor(df_tokyo2$DK)
+df_tokyo2$K <- as.factor(df_tokyo2$K)
+df_tokyo2$L <- as.factor(df_tokyo2$L)
+df_tokyo2$S <- as.factor(df_tokyo2$S)
+
+df_tokyo2$pred_rf <- predict(df_rf, newdata = df_tokyo2)
+
+df_tokyo2$diff <- df_tokyo2$pred_rf - df_tokyo2$rent_adm
+
+df_tokyo2_sort <- df_tokyo2 %>%
+  arrange(desc(diff))
+
+df_tokyo2_50 <- df_tokyo2_sort[1:50,]
+
+readr::write_excel_csv(df_tokyo2_50, "df_tokyo2_50.csv")
+```
+
